@@ -1,4 +1,3 @@
-# ai_organizer/ui.py
 import bpy
 import logging
 from .utils import logger
@@ -12,8 +11,21 @@ def draw_progress_bar(self, context):
     if 'ai_organizer_progress' in scene:
         layout.prop(scene, "ai_organizer_progress", text="Progress", slider=True)
         
-# --- Properties ---
 def register_properties():
+    # Scene properties for API settings
+    bpy.types.Scene.ai_organizer_api_key = bpy.props.StringProperty(
+        name="API Key",
+        description="Enter your Google Gemini API key",
+        default=""
+    )
+    
+    bpy.types.Scene.ai_organizer_api_url = bpy.props.StringProperty(
+        name="API URL",
+        description="Enter your Google Gemini API URL",
+        default="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+    )
+    
+    # Progress bar property
     bpy.types.Scene.ai_organizer_progress = bpy.props.IntProperty(
         name="AI Organizer Progress",
         description="AI Organizer progress percentage",
@@ -22,10 +34,10 @@ def register_properties():
         max=100
     )
 
-
 def unregister_properties():
+    del bpy.types.Scene.ai_organizer_api_key
+    del bpy.types.Scene.ai_organizer_api_url
     del bpy.types.Scene.ai_organizer_progress
-    
     
 def setup_logging():
     try:

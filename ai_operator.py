@@ -1,9 +1,11 @@
-# ai_organizer/operator.py
 import bpy
 from .data_collector import SceneDataCollector
 from .ai_analyzer import AIAnalyzer
 from .scene_applier import SceneApplier
 from .utils import logger
+
+def get_prefs():
+    return bpy.context.preferences.addons["ai_organizer"].preferences
 
 class AISceneOrganizerOperator(bpy.types.Operator):
     bl_idname = "object.ai_scene_organizer"
@@ -13,6 +15,7 @@ class AISceneOrganizerOperator(bpy.types.Operator):
     def execute(self, context):
         try:
             logger.info("Starting AI Scene Organization.")
+            
             # 씬 데이터 수집
             collector = SceneDataCollector()
             scene_data = collector.collect_scene_data(context)
@@ -21,8 +24,11 @@ class AISceneOrganizerOperator(bpy.types.Operator):
                 self.report({'ERROR'}, "Scene data collection failed.")
                 return {'CANCELLED'}
             
+            # preferences에서 API 설정 가져오기
+            prefs = get_prefs()
+            
             # AI 분석
-            analyzer = AIAnalyzer(bpy.context.scene.ai_organizer_api_url, bpy.context.scene.ai_organizer_api_key)
+            analyzer = AIAnalyzer(prefs.api_url, prefs.api_key)
             analysis_results = analyzer.analyze_scene(scene_data, context)
             if not analysis_results:
                 logger.error("AI analysis failed.")
