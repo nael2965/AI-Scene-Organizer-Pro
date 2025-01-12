@@ -28,12 +28,26 @@ def unregister_properties():
     
     
 def setup_logging():
-    prefs = bpy.context.preferences.addons[__name__].preferences
-    log_level = getattr(logging, prefs.ai_organizer_debug_level)
-    if prefs.ai_organizer_log_to_file and prefs.ai_organizer_log_path:
-       logging.basicConfig(filename=prefs.ai_organizer_log_path, level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
-    else:
-        logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    global logger
-    logger = logging.getLogger(__name__)
+    try:
+        # Scene properties를 사용
+        scene = bpy.context.scene
+        log_level = getattr(logging, scene.ai_organizer_debug_level)
+        
+        # 기본 로깅 설정
+        logging.basicConfig(
+            level=log_level,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        
+        # 전역 logger 설정
+        global logger
+        logger = logging.getLogger(__name__)
+        
+    except Exception as e:
+        print(f"Error setting up logging: {e}")
+        # 기본값으로 fallback
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s'
+        )
+        logger = logging.getLogger(__name__)

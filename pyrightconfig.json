@@ -1,0 +1,8 @@
+{
+    "reportUnusedImport": false,
+    "reportMissingImports": false,
+    "reportUndefinedVariable": false,
+    "reportInvalidTypeForm": false,
+    "reportShadowedImports": false,
+    "typeCheckingMode": "off"
+}

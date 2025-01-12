@@ -1,9 +1,14 @@
 # ai_organizer/data_collector.py
 import bpy
-import json
 import base64
 import struct
 from .utils import get_geometry_hash, logger
+import json
+try:
+    import bpy  # type: ignore
+except ImportError:
+    pass
+
 class SceneDataCollector:
     def __init__(self):
         self.geometry_database = {}

@@ -4,10 +4,13 @@ import logging
 import os
 from .utils import create_default_hierarchy, balance_braces, clean_json_str, logger
 try:
+    import bpy  # type: ignore
+except ImportError:
+    pass
+try:
     import requests # type: ignore
 except ImportError:
     print("requests module not available - this is normal when working in an IDE")
-import bpy
 
 class AIAnalyzer:
     def __init__(self, api_url, api_key):
@@ -132,7 +135,7 @@ class AIAnalyzer:
                         logger.error("No JSON found in response.")
                         raise ValueError("No JSON found in response")
                 except Exception as e:
-                    logger.error(f"JSON 처리 중 오류 발생: {e}", exc_info=True) 
+                    logger.error(f"JSON 처리 중 오류 발생: {e}", exc_info=True)
                     raise
 
             else:
