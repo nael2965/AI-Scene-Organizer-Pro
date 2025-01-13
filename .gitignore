@@ -1,0 +1,23 @@
+# Python 캐시 파일
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE 관련 파일
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# 로그 및 임시 파일
+*.log
+temp/
+logs/
+
+# 애드온 데이터 및 출력 파일
+responses/
+debug/
+
+# 운영체제 파일
+.DS_Store
+Thumbs.db
