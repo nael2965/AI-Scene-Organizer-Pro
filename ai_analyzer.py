@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 from datetime import datetime
 from pathlib import Path
 from .utils import create_default_hierarchy, balance_braces, clean_json_str, logger
@@ -9,20 +8,26 @@ try:
     import bpy
 except ImportError:
     pass
+
+# 비동기 라이브러리 임포트 시도
 try:
-    import requests #type: ignore
+    import aiohttp
+    import asyncio
+    ASYNC_AVAILABLE = True
 except ImportError:
-    print("requests module not available - this is normal when IDE testing")
+    ASYNC_AVAILABLE = False
+    import requests #type: ignore
 
 class AIAnalyzer:
     def __init__(self, api_url, api_key):
         self.api_url = api_url
         self.api_key = api_key
         self.response_data = None
+        self.use_async = ASYNC_AVAILABLE
 
-    def generate_prompt(self, scene_data):
-        """Generate a comprehensive prompt for scene analysis"""
-        prompt = f"""
+    def generate_prompt(self, scene_data, batch=None):
+        """프롬프트 생성"""
+        base_prompt = f"""
         You are a professional 3D scene organization expert specializing in optimizing complex scene hierarchies. 
         Your task is to analyze the provided scene data and create an intelligent, context-aware organizational structure.
 
@@ -172,18 +177,175 @@ class AIAnalyzer:
         Consider object relationships and spatial organization when creating the hierarchy.
         Ensure proper interpretation of the coordinate system for accurate spatial analysis.
         """
-        return prompt
+
+        if batch:
+            base_prompt += f"""
+            
+            IMPORTANT - BATCH PROCESSING INSTRUCTION:
+            This is part of a larger scene organization task. While you have access to the complete context,
+            focus your analysis and naming only on the following elements:
+            - Processing Type: {batch['type']}
+            - Element Range: {batch['range']['start']} to {batch['range']['end']}
+            - Total Elements: {batch['range']['end'] - batch['range']['start']}
+            
+            Follow the scene analysis, naming conventions, and collection hierarchy from the provided context,
+            but provide detailed metadata ONLY for the specified elements in this batch.
+            """
+        
+        return base_prompt
 
     def analyze_scene(self, scene_data, context):
-        """AI로 씬 분석"""
+        """씬 분석 시작"""
+        try:
+            if self.use_async:
+                # 기존의 이벤트 루프 활용
+                loop = asyncio.get_event_loop()
+                analysis_results = loop.run_until_complete(
+                    self._analyze_scene_stages(scene_data, context)
+                )
+                return analysis_results
+            else:
+                # 비동기 처리가 불가능한 경우 동기 처리로 폴백
+                return self._analyze_scene_sync(scene_data, context)
+                
+        except RuntimeError as e:
+            if "Event loop is closed" in str(e):
+                logger.info("Falling back to synchronous processing due to closed event loop")
+                return self._analyze_scene_sync(scene_data, context)
+            raise
+        except Exception as e:
+            logger.error(f"Scene analysis error: {e}")
+            return create_default_hierarchy()
+
+    async def _analyze_scene_stages(self, scene_data, context):
+        """비동기 단계별 씬 분석"""
         try:
             logger.info("Starting AI scene analysis")
-            prompt = self.generate_prompt(scene_data)
             
-            # API 요청 준비
-            headers = {
-                "Content-Type": "application/json"
+            # 1단계: 전체 씬 분석
+            initial_analysis = await self._analyze_scene_structure(scene_data)
+            if not initial_analysis:
+                return create_default_hierarchy()
+            
+            # 2단계: 배치 작업 준비
+            batches = self._prepare_batches(scene_data, initial_analysis)
+            
+            # 3단계: 병렬 배치 처리
+            batch_results = await self._process_batches_parallel(batches)
+            
+            # 4단계: 결과 통합
+            final_results = self._merge_results(initial_analysis, batch_results)
+            
+            # 응답 저장
+            preferences = bpy.context.preferences.addons["ai_organizer"].preferences
+            if preferences.save_response:
+                self._save_ai_response(final_results, preferences)
+            
+            logger.info("AI analysis completed successfully")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"AI analysis error: {e}", exc_info=True)
+            return create_default_hierarchy()
+
+    def _analyze_scene_sync(self, scene_data, context):
+        """동기 단계별 씬 분석"""
+        try:
+            logger.info("Starting AI scene analysis (synchronous)")
+            
+            # 1단계: 전체 씬 분석
+            initial_analysis = self._request_analysis_sync(
+                self.generate_prompt(scene_data)
+            )
+            if not initial_analysis:
+                return create_default_hierarchy()
+            
+            # 2단계: 배치 작업 준비
+            batches = self._prepare_batches(scene_data, initial_analysis)
+            
+            # 3단계: 순차적 배치 처리
+            batch_results = []
+            for batch in batches:
+                result = self._request_analysis_sync(
+                    self.generate_prompt(batch['data'], batch)
+                )
+                if result:
+                    batch_results.append(result)
+            
+            # 4단계: 결과 통합
+            final_results = self._merge_results(initial_analysis, batch_results)
+            
+            # 응답 저장
+            preferences = bpy.context.preferences.addons["ai_organizer"].preferences
+            if preferences.save_response:
+                self._save_ai_response(final_results, preferences)
+            
+            logger.info("AI analysis completed successfully (synchronous)")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"Synchronous AI analysis error: {e}", exc_info=True)
+            return create_default_hierarchy()
+
+    async def _analyze_scene_structure(self, scene_data):
+        """전체 씬의 맥락과 구조 분석"""
+        try:
+            prompt = self.generate_prompt(scene_data)
+            return await self._request_analysis_async(prompt)
+        except Exception as e:
+            logger.error(f"Scene structure analysis failed: {e}")
+            return None
+
+    def _prepare_batches(self, scene_data, initial_analysis):
+        """작업 배치 준비"""
+        batches = []
+        batch_size = 20  # 배치 크기 설정
+        
+        # 데이터블록 배치 준비
+        geometry_items = list(scene_data.get("geometry_database", {}).items())
+        for i in range(0, len(geometry_items), batch_size):
+            batch = {
+                "type": "geometry",
+                "data": {
+                    "geometry_database": dict(geometry_items[i:i + batch_size])
+                },
+                "range": {"start": i, "end": min(i + batch_size, len(geometry_items))},
+                "initial_analysis": initial_analysis
             }
+            batches.append(batch)
+        
+        # 오브젝트 배치 준비
+        objects = scene_data.get("objects", [])
+        for i in range(0, len(objects), batch_size):
+            batch = {
+                "type": "objects",
+                "data": {
+                    "objects": objects[i:i + batch_size]
+                },
+                "range": {"start": i, "end": min(i + batch_size, len(objects))},
+                "initial_analysis": initial_analysis
+            }
+            batches.append(batch)
+        
+        return batches
+
+    async def _process_batches_parallel(self, batches):
+        """배치 병렬 처리"""
+        try:
+            tasks = []
+            for batch in batches:
+                prompt = self.generate_prompt(batch['data'], batch)
+                tasks.append(self._request_analysis_async(prompt))
+            
+            return await asyncio.gather(*tasks)
+        except Exception as e:
+            logger.error(f"Batch processing error: {e}")
+            return []
+
+    async def _request_analysis_async(self, prompt):
+        """비동기 API 요청"""
+        try:
+            headers = {"Content-Type": "application/json"}
             payload = {
                 "contents": [{
                     "parts": [{
@@ -192,65 +354,102 @@ class AIAnalyzer:
                 }]
             }
             
-            # API 요청
-            api_url = f"{self.api_url}?key={self.api_key}"
-            session = requests.Session()
-            response = session.post(api_url, headers=headers, json=payload)
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.api_url}?key={self.api_key}",
+                    headers=headers,
+                    json=payload
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        text_content = result['candidates'][0]['content']['parts'][0]['text']
+                        return self._parse_response(text_content)
+                    else:
+                        logger.error(f"API request failed: {response.status}")
+                        return None
+                        
+        except Exception as e:
+            logger.error(f"API request error: {e}")
+            return None
+
+    def _request_analysis_sync(self, prompt):
+        """동기 API 요청"""
+        try:
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{
+                    "parts": [{
+                        "text": prompt
+                    }]
+                }]
+            }
             
-            # 응답 저장 - preferences 가져오기
-            preferences = bpy.context.preferences.addons["ai_organizer"].preferences
-            if preferences.save_response:
-                self._save_ai_response(response, preferences)
+            response = requests.post(
+                f"{self.api_url}?key={self.api_key}",
+                headers=headers,
+                json=payload
+            )
             
             if response.status_code == 200:
-                logger.info("AI analysis API request successful")
                 result = response.json()
                 text_content = result['candidates'][0]['content']['parts'][0]['text']
-                
-                try:
-                    json_str = self._extract_json_from_response(text_content)
-                    if json_str:
-                        analysis_results = self._parse_and_validate_json(json_str)
-                        if analysis_results:
-                            logger.info("AI analysis completed successfully")
-                            return analysis_results
-                    
-                    logger.error("Failed to extract valid JSON from AI response")
-                    return create_default_hierarchy()
-                    
-                except Exception as e:
-                    logger.error(f"JSON processing error: {e}", exc_info=True)
-                    return create_default_hierarchy()
+                return self._parse_response(text_content)
             else:
-                logger.error(f"AI API request failed: {response.status_code}")
-                return create_default_hierarchy()
+                logger.error(f"API request failed: {response.status_code}")
+                return None
                 
         except Exception as e:
-            logger.error(f"AI analysis error: {e}", exc_info=True)
-            return create_default_hierarchy()
-            
-    def _extract_json_from_response(self, text_content):
-        """AI 응답에서 JSON 추출 및 정제"""
+            logger.error(f"API request error: {e}")
+            return None
+
+    def _merge_results(self, initial_analysis, batch_results):
+        """분석 결과 통합"""
+        merged_results = {
+            "scene_analysis": initial_analysis["scene_analysis"],
+            "collection_hierarchy": initial_analysis["collection_hierarchy"],
+            "data_metadata": {"geometry": {}, "lights": {}, "cameras": {}},
+            "object_metadata": {}
+        }
+        
+        for result in batch_results:
+            if result and isinstance(result, dict):
+                if "data_metadata" in result:
+                    for category in ["geometry", "lights", "cameras"]:
+                        merged_results["data_metadata"][category].update(
+                            result["data_metadata"].get(category, {})
+                        )
+                
+                if "object_metadata" in result:
+                    merged_results["object_metadata"].update(result["object_metadata"])
+        
+        return merged_results
+
+    def _parse_response(self, text_content):
+        """AI 응답 파싱"""
         try:
-            # JSON 시작과 끝 위치 찾기
+            # JSON 문자열 추출
+            json_str = self._extract_json_from_response(text_content)
+            if not json_str:
+                return None
+
+            # 추출된 JSON 문자열 정제
+            cleaned_json = clean_json_str(json_str)
+            
+            # 정제된 JSON 파싱 및 검증
+            return self._parse_and_validate_json(cleaned_json)
+        except Exception as e:
+            logger.error(f"Response parsing error: {e}")
+            return None
+
+    def _extract_json_from_response(self, text_content):
+        """AI 응답에서 JSON 추출"""
+        try:
             json_start = text_content.find('{')
             json_end = text_content.rfind('}') + 1
             
             if json_start != -1 and json_end > json_start:
                 json_str = text_content[json_start:json_end]
-                
-                # JSON 문자열 정제
-                json_str = json_str.replace("'", '"')  # 작은따옴표를 큰따옴표로 변경
-                json_str = json_str.replace('\n', ' ')  # 줄바꿈 제거
-                json_str = ' '.join(json_str.split())  # 중복 공백 제거
-                
-                # 추가 정제 작업
-                json_str = json_str.replace('}, }', '}}')
-                json_str = json_str.replace('}, ]', '}}')
-                
-                # 디버깅을 위한 로깅
                 logger.debug(f"Extracted JSON string: {json_str[:100]}...")
-                
                 return json_str
                 
             logger.error("No JSON content found in response")
@@ -265,19 +464,17 @@ class AIAnalyzer:
         try:
             data = json.loads(json_str)
             
-            # 필수 최상위 키 확인
+            # 필수 키 검증
             required_keys = ['scene_analysis', 'collection_hierarchy', 
-                           'data_metadata', 'object_metadata']
+                            'data_metadata', 'object_metadata']
             if not all(key in data for key in required_keys):
                 logger.error("Missing required top-level keys in JSON")
                 return None
 
-            # collection_hierarchy 유효성 검사
+            # collection_hierarchy 구조 검증
             if not isinstance(data['collection_hierarchy'], dict):
                 logger.error("Invalid collection_hierarchy structure")
                 return None
-
-            # 기타 검증 로직 추가 가능...
 
             return data
             
@@ -288,8 +485,8 @@ class AIAnalyzer:
             logger.error(f"JSON validation error: {e}", exc_info=True)
             return None
 
-    def _save_ai_response(self, response_data, preferences):
-        """Save AI response to file with complete data"""
+    def _save_ai_response(self, response_data, preferences, response_type="response"):
+        """Save AI response to file"""
         try:
             if not preferences.save_response:
                 return
@@ -301,47 +498,19 @@ class AIAnalyzer:
                 return
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            response_file = Path(response_path) / f"ai_response_{timestamp}.json"
-            response_file.parent.mkdir(parents=True, exist_ok=True)
-
-            # 응답 데이터 준비
-            try:
-                response_json = response_data.json()
-            except Exception as e:
-                response_json = {"error": "Failed to parse response as JSON"}
-                logger.error(f"Failed to parse response as JSON: {e}")
-
+            filename = f"ai_response_{timestamp}_{response_type}.json"
+            response_file = Path(response_path) / filename
+            
             save_data = {
                 "timestamp": datetime.now().isoformat(),
-                "request_info": {
-                    "url": self.api_url,
-                    "status_code": response_data.status_code,
-                    "headers": dict(response_data.headers)
-                },
-                "response_content": response_json,
-                "raw_text": response_data.text
+                "type": response_type,
+                "response_content": response_data
             }
 
-            # JSON 파일로 저장
             with open(response_file, 'w', encoding='utf-8') as f:
                 json.dump(save_data, f, indent=2, ensure_ascii=False)
                 
-            logger.info(f"AI response successfully saved to: {response_file}")
+            logger.info(f"AI response ({response_type}) saved to: {response_file}")
             
         except Exception as e:
             logger.error(f"Failed to save AI response: {e}", exc_info=True)
-
-    def _count_collections(self, response_data):
-        """Helper method to count collections in the response"""
-        try:
-            def count_recursive(node):
-                count = 1  # Count current node
-                children = node.get("children", [])
-                for child in children:
-                    count += count_recursive(child)
-                return count
-
-            hierarchy = response_data.json().get("collection_hierarchy", {})
-            return count_recursive(hierarchy) if hierarchy else 0
-        except:
-            return 0

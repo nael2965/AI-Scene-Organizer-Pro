@@ -91,22 +91,21 @@ class SceneApplier:
             raise
 
     def _process_collection_children(self, collection_info, parent_collection):
-        """Process collection children and organize objects"""
+        """컬렉션 계층 구조 처리"""
         try:
-            # Process objects assigned to this collection
+            # objects 리스트에 있는 오브젝트만 처리
             if "objects" in collection_info:
                 for obj_name in collection_info["objects"]:
                     obj = bpy.data.objects.get(obj_name)
-                    if obj:
-                        # Unlink from other collections except Scene Collection
+                    if obj and obj.type != 'MESH':  # 메시가 아닌 오브젝트만 처리
                         self._manage_object_collection_links(obj, parent_collection)
-                        
-            # Process child collections recursively
+            
+            # 하위 컬렉션 처리
             if "children" in collection_info:
                 for child in collection_info["children"]:
                     child_collection = self._create_collection(child["name"], parent_collection)
                     self._process_collection_children(child, child_collection)
-                    
+                        
         except Exception as e:
             logger.error(f"Error processing collection children: {e}", exc_info=True)
 
@@ -173,22 +172,28 @@ class SceneApplier:
             logger.error(f"Error applying geometry metadata: {e}", exc_info=True)
 
     def _apply_light_metadata(self, context, light_id, light_meta):
-        """Apply metadata to light data blocks"""
+        """라이트 데이터 메타데이터 적용"""
         try:
-            if light_id in bpy.data.lights:
-                light = bpy.data.lights[light_id]
-                light.name = light_meta["name"]
-                logger.debug(f"Applied light metadata to {light.name}")
+            for obj in context.scene.objects:
+                if obj.type == 'LIGHT' and obj.data:
+                    if obj.name == light_id or obj.data.name == light_id:
+                        # 데이터블록 이름 변경
+                        obj.data.name = light_meta["name"]
+                        logger.debug(f"Applied light metadata to {obj.data.name}")
+                        break
         except Exception as e:
             logger.error(f"Error applying light metadata: {e}", exc_info=True)
 
     def _apply_camera_metadata(self, context, cam_id, cam_meta):
-        """Apply metadata to camera data blocks"""
+        """카메라 데이터 메타데이터 적용"""
         try:
-            if cam_id in bpy.data.cameras:
-                camera = bpy.data.cameras[cam_id]
-                camera.name = cam_meta["name"]
-                logger.debug(f"Applied camera metadata to {camera.name}")
+            for obj in context.scene.objects:
+                if obj.type == 'CAMERA' and obj.data:
+                    if obj.name == cam_id or obj.data.name == cam_id:
+                        # 데이터블록 이름 변경
+                        obj.data.name = cam_meta["name"]
+                        logger.debug(f"Applied camera metadata to {obj.data.name}")
+                        break
         except Exception as e:
             logger.error(f"Error applying camera metadata: {e}", exc_info=True)
 

@@ -1,4 +1,5 @@
 import bpy
+import json
 import base64
 import struct
 import logging
@@ -218,3 +219,120 @@ def get_scene_stats():
     except Exception as e:
         logger.error(f"Error collecting scene stats: {e}")
         return None
+    
+def clean_json_str(json_str):
+    """AI 응답에서 추출한 JSON 문자열을 정제하고 유효한 JSON 형식으로 변환합니다."""
+    try:
+        # 기본 문자열 정리
+        cleaned = json_str.strip()
+        
+        # 따옴표 정리
+        cleaned = cleaned.replace("'", '"')
+        cleaned = cleaned.replace('"s ', "'s ")  # 소유격 보존
+        cleaned = cleaned.replace('" ', '"')     # 불필요한 공백 제거
+        
+        # 줄바꿈과 공백 처리
+        cleaned = ' '.join(cleaned.split())
+        
+        # JSON 구조 교정
+        cleaned = _fix_json_structure(cleaned)
+        
+        # 쉼표 관련 문제 해결
+        cleaned = _fix_json_delimiters(cleaned)
+        
+        # 중첩된 JSON 문제 해결
+        cleaned = _handle_nested_json(cleaned)
+        
+        # 최종 유효성 검사
+        json.loads(cleaned)  # 테스트 파싱
+        
+        return cleaned
+        
+    except Exception as e:
+        logger.error(f"JSON cleaning error: {e}")
+        # 실패 시 원본 반환
+        return json_str
+
+def _fix_json_structure(json_str):
+    """JSON 구조의 일반적인 문제를 해결합니다."""
+    # 중괄호와 대괄호 균형 맞추기
+    json_str = balance_braces(json_str)
+    
+    # 빈 값 처리
+    json_str = json_str.replace('"":', '": null')
+    json_str = json_str.replace(': ,', ': null,')
+    json_str = json_str.replace(': }', ': null}')
+    json_str = json_str.replace(': ]', ': null]')
+    
+    # 불완전한 객체 종료 처리
+    if json_str.count('{') > json_str.count('}'):
+        json_str += '}' * (json_str.count('{') - json_str.count('}'))
+    
+    return json_str
+
+def _fix_json_delimiters(json_str):
+    """JSON 구분자 관련 문제를 해결합니다."""
+    # 쉼표 관련 문제 해결
+    json_str = json_str.replace(',}', '}')
+    json_str = json_str.replace(',]', ']')
+    json_str = json_str.replace(',,', ',')
+    
+    # 객체와 배열 사이의 구분자 수정
+    json_str = json_str.replace('}{', '},{')
+    json_str = json_str.replace('][', '],[')
+    json_str = json_str.replace('}"', '}, "')
+    
+    # 누락된 쉼표 추가
+    lines = json_str.split('\n')
+    fixed_lines = []
+    for i, line in enumerate(lines[:-1]):
+        line = line.rstrip()
+        next_line = lines[i+1].lstrip()
+        if (line.endswith('"') or line.endswith('}') or line.endswith(']')) and \
+           (next_line.startswith('"') or next_line.startswith('{') or next_line.startswith('[')):
+            if not line.endswith(','):
+                line += ','
+        fixed_lines.append(line)
+    fixed_lines.append(lines[-1])
+    
+    return '\n'.join(fixed_lines)
+
+def _handle_nested_json(json_str):
+    """중첩된 JSON 문자열 문제를 해결합니다."""
+    # 이스케이프된 따옴표 처리
+    json_str = json_str.replace('\\"', '"')
+    
+    # 중첩된 JSON 문자열 정규화
+    stack = []
+    normalized = []
+    in_string = False
+    escape_next = False
+    
+    for char in json_str:
+        if escape_next:
+            escape_next = False
+            normalized.append(char)
+            continue
+            
+        if char == '\\':
+            escape_next = True
+            normalized.append(char)
+            continue
+            
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            
+        if in_string:
+            normalized.append(char)
+        else:
+            if char in '{[':
+                stack.append(char)
+                normalized.append(char)
+            elif char in '}]':
+                if stack:
+                    stack.pop()
+                normalized.append(char)
+            else:
+                normalized.append(char)
+    
+    return ''.join(normalized)
