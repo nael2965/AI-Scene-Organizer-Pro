@@ -21,7 +21,7 @@ bl_info = {
     "name": "AI Scene Organizer Pro",
     "blender": (4, 3, 2),
     "category": "Object",
-    "version": (1, 8, 1),
+    "version": (1, 8, 2),
     "author": "Nael",
     "description": "Advanced AI-powered scene organization system with hierarchical analysis",
     "location": "View3D > Object Menu > AI Scene Organizer",
