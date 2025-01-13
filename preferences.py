@@ -16,16 +16,47 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
     # API Configuration
     api_key: StringProperty(
         name="API Key",
-        description="Google Gemini API authentication key",
+        description="AI API authentication key",
         default="",
         subtype='PASSWORD'
     )
-    
-    api_url: StringProperty(
-        name="API URL",
-        description="Google Gemini API endpoint URL",
-        default="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
+
+    # 통합된 모델 선택 드롭다운
+    ai_model: EnumProperty(
+        name="AI Model",
+        description="Select AI model to use for scene organization", # 툴팁은 영어로
+        items=[
+            # Gemini Models
+            ('gemini-2.0-flash-exp', "Gemini 2.0 Flash (Experimental)", "Latest experimental version of Gemini 2.0"),
+            ('gemini-1.5-flash-latest', "Gemini 1.5 Flash (Latest)", "Latest development version of Gemini 1.5 Flash"),
+            ('gemini-1.5-flash', "Gemini 1.5 Flash (Stable)", "Latest stable version of Gemini 1.5 Flash"),
+            ('gemini-1.5-flash-001', "Gemini 1.5 Flash 001", "Public release version 001 of Gemini 1.5 Flash"),
+            ('gemini-1.5-flash-002', "Gemini 1.5 Flash 002", "Public release version 002 of Gemini 1.5 Flash"),
+            ('gemini-1.5-flash-8b-latest', "Gemini 1.5 Flash 8B (Latest)", "Latest 8B development version"),
+            ('gemini-1.5-flash-8b', "Gemini 1.5 Flash 8B (Stable)", "Latest stable 8B version"),
+            ('gemini-1.5-flash-8b-001', "Gemini 1.5 Flash 8B 001", "Public release 8B version 001"),
+            ('gemini-1.5-pro-latest', "Gemini 1.5 Pro (Latest)", "Latest Pro development version"),
+            ('gemini-1.5-pro', "Gemini 1.5 Pro (Stable)", "Latest stable Pro version"),
+            ('gemini-1.5-pro-001', "Gemini 1.5 Pro 001", "Public release Pro version 001"),
+            ('gemini-1.5-pro-002', "Gemini 1.5 Pro 002", "Public release Pro version 002"),
+            
+            # Claude Models (준비중)
+            ('claude-placeholder', "Claude (Preparing)", "Claude models are not yet available"),
+            
+            # GPT Models (준비중)
+            ('gpt-placeholder', "GPT (Preparing)", "GPT models are not yet available"),
+        ],
+        default='gemini-1.5-flash'
     )
+
+    @property
+    def api_url(self):
+        """선택된 모델에 따른 동적 API URL 생성"""
+        # HEADER나 준비중인 모델은 제외
+        if self.ai_model.startswith('gemini-'):
+            base_url = "https://generativelanguage.googleapis.com/v1beta/models"
+            return f"{base_url}/{self.ai_model}:generateContent"
+        return ""
     
     use_batch_processing: BoolProperty(
         name="Use Batch Processing",
@@ -87,12 +118,11 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
     def draw(self, context):
         layout = self.layout
         
-        # API Settings
-        api_box = layout.box()
-        api_box.label(text="API Configuration", icon='URL')
-        api_col = api_box.column()
-        api_col.prop(self, "api_key")
-        api_col.prop(self, "api_url")
+        # AI 모델 설정
+        model_box = layout.box()
+        model_box.label(text="AI Model Settings", icon='RNA')
+        model_box.prop(self, "ai_model")
+        model_box.prop(self, "api_key")
         
         # Batch Processing Settings
         batch_box = layout.box()
@@ -105,7 +135,7 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
             sub_col = batch_col.column()
             sub_col.prop(self, "batch_size")
             # 배치 처리 관련 안내 메시지 추가
-            sub_col.label(text="Smaller batch sizes are more reliable but take longer", icon='INFO')
+            sub_col.label(text="Larger batch sizes are more reliable but more possible to be over the token limit", icon='INFO')
 
         # Logging Settings
         log_box = layout.box()
