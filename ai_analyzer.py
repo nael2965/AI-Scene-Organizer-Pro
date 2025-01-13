@@ -24,6 +24,11 @@ class AIAnalyzer:
         self.api_key = api_key
         self.response_data = None
         self.use_async = ASYNC_AVAILABLE
+        
+        # 배치 처리 설정 초기화
+        preferences = bpy.context.preferences.addons["ai_organizer"].preferences
+        self.use_batch = preferences.use_batch_processing
+        self.batch_size = preferences.batch_size if self.use_batch else None
 
     def generate_prompt(self, scene_data, batch=None):
         """프롬프트 생성"""
@@ -198,20 +203,32 @@ class AIAnalyzer:
         """씬 분석 시작"""
         try:
             if self.use_async:
-                # 기존의 이벤트 루프 활용
                 loop = asyncio.get_event_loop()
-                analysis_results = loop.run_until_complete(
-                    self._analyze_scene_stages(scene_data, context)
-                )
+                if self.use_batch:
+                    analysis_results = loop.run_until_complete(
+                        self._analyze_scene_stages(scene_data, context)
+                    )
+                else:
+                    prompt = self.generate_prompt(scene_data)
+                    analysis_results = loop.run_until_complete(
+                        self._request_analysis_async(prompt)
+                    )
                 return analysis_results
             else:
-                # 비동기 처리가 불가능한 경우 동기 처리로 폴백
-                return self._analyze_scene_sync(scene_data, context)
-                
+                if self.use_batch:
+                    return self._analyze_scene_sync(scene_data, context)
+                else:
+                    prompt = self.generate_prompt(scene_data)
+                    return self._request_analysis_sync(prompt)
+                    
         except RuntimeError as e:
             if "Event loop is closed" in str(e):
                 logger.info("Falling back to synchronous processing due to closed event loop")
-                return self._analyze_scene_sync(scene_data, context)
+                if self.use_batch:
+                    return self._analyze_scene_sync(scene_data, context)
+                else:
+                    prompt = self.generate_prompt(scene_data)
+                    return self._request_analysis_sync(prompt)
             raise
         except Exception as e:
             logger.error(f"Scene analysis error: {e}")
@@ -222,21 +239,17 @@ class AIAnalyzer:
         try:
             logger.info("Starting AI scene analysis")
             
-            # 1단계: 전체 씬 분석
             initial_analysis = await self._analyze_scene_structure(scene_data)
             if not initial_analysis:
                 return create_default_hierarchy()
             
-            # 2단계: 배치 작업 준비
-            batches = self._prepare_batches(scene_data, initial_analysis)
+            if self.use_batch:
+                batches = self._prepare_batches(scene_data, initial_analysis)
+                batch_results = await self._process_batches_parallel(batches)
+                final_results = self._merge_results(initial_analysis, batch_results)
+            else:
+                final_results = initial_analysis
             
-            # 3단계: 병렬 배치 처리
-            batch_results = await self._process_batches_parallel(batches)
-            
-            # 4단계: 결과 통합
-            final_results = self._merge_results(initial_analysis, batch_results)
-            
-            # 응답 저장
             preferences = bpy.context.preferences.addons["ai_organizer"].preferences
             if preferences.save_response:
                 self._save_ai_response(final_results, preferences)

@@ -27,6 +27,22 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
         default="https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
     )
     
+    use_batch_processing: BoolProperty(
+        name="Use Batch Processing",
+        description="Process large scenes in smaller batches to avoid token limits",
+        default=False
+    )
+    
+    batch_size: IntProperty(
+        name="Batch Size",
+        description="Number of items to process in each batch (recommended: 20-30)",
+        default=20,
+        min=5,
+        max=50,
+        soft_min=10,
+        soft_max=40
+    )
+
     # Logging Configuration
     debug_level: EnumProperty(
         name="Debug Level",
@@ -44,7 +60,7 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
     log_to_file: BoolProperty(
         name="Enable File Logging",
         description="Save log messages to a file",
-        default=True
+        default=False
     )
     
     log_path: StringProperty(
@@ -58,7 +74,7 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
     save_response: BoolProperty(
         name="Save AI Responses",
         description="Save detailed AI analysis responses for review",
-        default=True
+        default=False
     )
     
     response_path: StringProperty(
@@ -78,6 +94,19 @@ class AISceneOrganizerPreferences(bpy.types.AddonPreferences):
         api_col.prop(self, "api_key")
         api_col.prop(self, "api_url")
         
+        # Batch Processing Settings
+        batch_box = layout.box()
+        batch_box.label(text="Batch Processing", icon='SEQUENCE')
+        batch_col = batch_box.column()
+        batch_col.prop(self, "use_batch_processing")
+        
+        # Batch size setting은 batch processing이 활성화된 경우에만 표시
+        if self.use_batch_processing:
+            sub_col = batch_col.column()
+            sub_col.prop(self, "batch_size")
+            # 배치 처리 관련 안내 메시지 추가
+            sub_col.label(text="Smaller batch sizes are more reliable but take longer", icon='INFO')
+
         # Logging Settings
         log_box = layout.box()
         log_box.label(text="Logging Configuration", icon='TEXT')
