@@ -1,4 +1,5 @@
 # AI Scene Organizer Pro
+Blender Add-On
 
 ## Purpose
 
